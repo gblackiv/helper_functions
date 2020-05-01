@@ -1,6 +1,6 @@
 
 //this is in order to find a container on an outbound
-exports.test2 = functions.https.onRequest(req => {
+exports.findContainerOnOutbound = functions.https.onRequest(req => {
   return admin.firestore().collectionGroup('Lines').get().then(snap => {
     const returnedArray = [];
     snap.forEach(doc => {
@@ -15,10 +15,8 @@ exports.test2 = functions.https.onRequest(req => {
   })
 })
 
-
-
 // This is what returns a process form back to before it was completed
-exports.test = functions.https.onRequest(req => {
+exports.revertProcessForm = functions.https.onRequest(req => {
   const admin2 = require('firebase-admin');
   return admin.firestore().collection('Tracking-Forms').doc('AMnRtZvnYojeod6St6hf').collection('Inventory-Summary').get().then(snap => {
     const batch = admin.firestore().batch();
@@ -60,7 +58,7 @@ exports.test = functions.https.onRequest(req => {
 })
 
 // This function assigned flags to all items that were sorted and lost their flag. it used the inbound container and the purchase order to do it
-exports.test = functions.https.onRequest(req => {
+exports.attachFlagToMissing = functions.https.onRequest(req => {
   return Promise.all([
     admin.firestore().collection('Tracking-Inventory').where('Source', '==', 'Sort').where('Flag', '==', '').get(),
     admin.firestore().collection('Tracking-Materials').get(),
@@ -97,7 +95,7 @@ exports.test = functions.https.onRequest(req => {
 });
 
 //this was used to attach DateShipped to all invoices
-exports.test = functions.https.onRequest(req => {
+exports.attachedDateShippedToInvoices = functions.https.onRequest(req => {
   return Promise.all([
     admin.firestore().collection('Tracking-Invoices').get(),
     admin.firestore().collectionGroup('Shipping-Documents').get(),
@@ -262,4 +260,61 @@ exports.fixTest = functions.https.onRequest(req => {
   }).catch(error => {
     return console.log(error)
   })
+})
+
+//add a shard value to all container docs
+exports.addShardToContainers = functions.https.onRequest(req => {
+  return admin.firestore().collection('Tracking-Containers').get().then(snap => {
+    const promiseArray = [];
+    const docs = snap.forEach(doc => {
+      promiseArray.push(doc.ref.update({
+        Shard: parseInt(Math.random() * 5 + 1),
+      }))
+    });
+    return Promise.all(promiseArray).then(() => console.log('success')).catch(error => console.log(error));
+  })
+})
+
+exports.changeYieldsFromProcessForm = functions.https.onRequest(req => {
+  const arrayOfQueries = [];
+  arrayOfQueries.push(admin.firestore().collection('Tracking-Forms').doc('QMQlF70DNpkjZYmFgfhc').collection('Created-Yields').get());
+  arrayOfQueries.push(admin.firestore().collection('Tracking-Forms').doc('QMQlF70DNpkjZYmFgfhc').collection('Inventory-Summary').get());
+
+  return Promise.all(arrayOfQueries).then(values => {
+    const yieldDocs = values[0].docs.map(doc => ({ ...doc.data(), id: doc.id }));
+    const inventorySummary = values[1].docs.map(doc => ({ ...doc.data(), id: doc.id })).filter(item => item.Yield);
+    const batch = admin.firestore().batch();
+
+    batch.update(admin.firestore().collection('Tracking-Forms').doc('QMQlF70DNpkjZYmFgfhc'), {
+      TypeRef: 'PicVV4aNrQXxoQRCKUC9',
+      AdminNote: `Gerry Blackmon adjusted this process form. According to Max on 4/29/2020, all yields from this form were marked incorrect. 
+      Originally they were marked as Lead Plates - Industrial. I have changed all the places this form said that, and changed them to the requested type: Lead Plates - Thick Separator`
+    });
+
+    yieldDocs.forEach(yieldDoc => {
+      batch.update(admin.firestore().collection('Tracking-Forms').doc('QMQlF70DNpkjZYmFgfhc').collection('Created-Yields').doc(yieldDoc.id), {
+        Yield: {
+          Name: 'Thick Separator',
+          Ref: 'PicVV4aNrQXxoQRCKUC9',
+        }
+      })
+    });
+
+    inventorySummary.forEach(inventory => {
+      if (inventory.Yield) {
+        batch.update(admin.firestore().collection('Tracking-Forms').doc('QMQlF70DNpkjZYmFgfhc').collection('Inventory-Summary').doc(inventory.id), {
+          Type: 'Thick Separator'
+        });
+        batch.update(admin.firestore().collection('Tracking-Inventory').doc(inventory.ItemRef), {
+          Type: {
+            Name: 'Thick Separator',
+            Ref: 'PicVV4aNrQXxoQRCKUC9',
+          }
+        })
+      }
+    });
+
+    return batch.commit().then(() => console.log('success')).catch(error => console.log(error))
+  })
+
 })
